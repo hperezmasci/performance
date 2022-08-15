@@ -7,6 +7,7 @@ CCFLAGS = -std=gnu99 -Wall -O3 -g -DNDEBUG -pthread
 LDFLAGS = -lpthread -pthread
 
 EXECUTABLES = \
+	client \
 	epoll-server \
 	threadspammer \
 	threaded-server
@@ -17,6 +18,9 @@ threaded-server: utils.c threaded-server.c
 	$(CC) $(CCFLAGS) $^ -o $@ $(LDFLAGS)
 
 epoll-server: utils.c epoll-server.c
+	$(CC) $(CCFLAGS) $^ -o $@ $(LDFLAGS)
+
+client: utils.c client.c
 	$(CC) $(CCFLAGS) $^ -o $@ $(LDFLAGS)
 
 threadspammer: threadspammer.c

@@ -50,20 +50,20 @@ def make_new_connection(name, host, port):
     s = b'^abc$de^abte$f'
     logging.info('{0} sending {1}'.format(name, s))
     sockobj.send(s)
-    time.sleep(1.0)
+    #time.sleep(1.0)
 
     s = b'xyz^123'
     logging.info('{0} sending {1}'.format(name, s))
     sockobj.send(s)
-    time.sleep(1.0)
+    #time.sleep(1.0)
 
     # The 0000 sent to the server here will result in an echo of 1111, which is
     # a sign for the reading thread to terminate.
     # Add WXY after 0000 to enable kill-switch in some servers.
-    s = b'25$^ab0000$abab'
+    s = b'hello there!$'
     logging.info('{0} sending {1}'.format(name, s))
     sockobj.send(s)
-    time.sleep(0.2)
+    #time.sleep(0.2)
 
     rthread.join()
     sockobj.close()

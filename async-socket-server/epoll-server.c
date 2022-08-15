@@ -79,6 +79,7 @@ fd_status_t on_peer_ready_recv(int sockfd) {
     // Until the initial ACK has been sent to the peer, there's nothing we
     // want to receive. Also, wait until all data staged for sending is sent to
     // receive more data.
+    printf("(H) on_peer_ready_recv before ACK or with data to be sent\n");
     return fd_status_W;
   }
 
@@ -95,6 +96,7 @@ fd_status_t on_peer_ready_recv(int sockfd) {
       perror_die("recv");
     }
   }
+  printf("(H) on_peer_ready_recv receiving data\n");
   bool ready_to_send = false;
   for (int i = 0; i < nbytes; ++i) {
     switch (peerstate->state) {
@@ -111,7 +113,7 @@ fd_status_t on_peer_ready_recv(int sockfd) {
         peerstate->state = WAIT_FOR_MSG;
       } else {
         assert(peerstate->sendbuf_end < SENDBUF_SIZE);
-        peerstate->sendbuf[peerstate->sendbuf_end++] = buf[i] + 1;
+        peerstate->sendbuf[peerstate->sendbuf_end++] = buf[i];
         ready_to_send = true;
       }
       break;
@@ -129,6 +131,7 @@ fd_status_t on_peer_ready_send(int sockfd) {
 
   if (peerstate->sendptr >= peerstate->sendbuf_end) {
     // Nothing to send.
+    printf("(H) on_peer_ready_send nothing to be sent\n");
     return fd_status_RW;
   }
   int sendlen = peerstate->sendbuf_end - peerstate->sendptr;
@@ -140,6 +143,8 @@ fd_status_t on_peer_ready_send(int sockfd) {
       perror_die("send");
     }
   }
+  printf("(H) on_peer_ready_send sending data\n");
+
   if (nsent < sendlen) {
     peerstate->sendptr += nsent;
     return fd_status_W;
@@ -186,6 +191,7 @@ int main(int argc, const char** argv) {
     die("Unable to allocate memory for epoll_events");
   }
 
+  // event loop
   while (1) {
     int nready = epoll_wait(epollfd, events, MAXFDS, -1);
     for (int i = 0; i < nready; i++) {
@@ -220,6 +226,8 @@ int main(int argc, const char** argv) {
           struct epoll_event event = {0};
           event.data.fd = newsockfd;
           if (status.want_read) {
+            // nunca entra aquí porque on_peer_connected siempre envía '*'
+            printf("(H) want_read after on_peer_connected!\n");
             event.events |= EPOLLIN;
           }
           if (status.want_write) {
