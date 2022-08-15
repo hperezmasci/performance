@@ -22,6 +22,7 @@
 typedef enum { INITIAL_ACK, WAIT_FOR_MSG, IN_MSG } ProcessingState;
 
 #define SENDBUF_SIZE 1024
+#define RECVBUF_SIZE 1024
 
 typedef struct {
   ProcessingState state;
@@ -83,7 +84,7 @@ fd_status_t on_peer_ready_recv(int sockfd) {
     return fd_status_W;
   }
 
-  uint8_t buf[1024];
+  uint8_t buf[RECVBUF_SIZE];
   int nbytes = recv(sockfd, buf, sizeof buf, 0);
   if (nbytes == 0) {
     // The peer disconnected.
