@@ -8,6 +8,7 @@ LDFLAGS = -lpthread -pthread
 
 EXECUTABLES = \
 	client \
+	epoll-client \
 	epoll-server \
 	threadspammer \
 	threaded-server
@@ -23,6 +24,8 @@ epoll-server: utils.c epoll-server.c
 client: utils.c client.c
 	$(CC) $(CCFLAGS) $^ -o $@ $(LDFLAGS)
 
+epoll-client: utils.c epoll-client.c
+	$(CC) $(CCFLAGS) $^ -o $@ $(LDFLAGS)
 threadspammer: threadspammer.c
 	$(CC) $(CCFLAGS) $^ -o $@ $(LDFLAGS)
 

@@ -17,7 +17,7 @@
 
 #include "utils.h"
 
-#define MAXFDS 16 * 1024
+#define MAXFDS 50000
 
 typedef enum { INITIAL_ACK, WAIT_FOR_MSG, IN_MSG } ProcessingState;
 
