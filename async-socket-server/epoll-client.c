@@ -16,6 +16,14 @@
 #define MSGSIZE 512         // menssage size
 #define MAXCONC 100         // max concurrency
 
+/*
+    XXX FIXME:
+    extra room in global context (filedescriptors are not always assigned
+    sequencially), should use another kind of structure?
+    (hashes? malloc and realloc?)
+*/
+#define GCEXTRA 100
+
 typedef enum { WAIT_ACK, SEND, RECV, END } state_t;
 
 #define SENDBUF_SIZE 1024
@@ -27,8 +35,11 @@ typedef struct {
     int sendptr;
 } context_t;
 
-context_t global_context[MAXCONC];
-int fd_offset = -1;         // offset of the first file descriptor
+// problema: los file descriptors no se asignan siempre de forma secuencial
+// lo que hace que add_connection pinche cuando está llegando al máximo de FDs
+// dado que no alcanza el espacio. No sé si lo resuelvo "fácil" agregando
+// espacio en global_context, por ahí hay que acudir a otra estructura (un hash)
+context_t global_context[MAXCONC+GCEXTRA];
 
 void
 add_connection(int epollfd, struct sockaddr* saddr)
@@ -53,11 +64,8 @@ add_connection(int epollfd, struct sockaddr* saddr)
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sockfd, &event) < 0)
         die("error with epoll_ctl: %s", strerror(errno));
     
-    if (fd_offset == -1) {
-        fd_offset = sockfd;
-    }
     // initialize context
-    context_t* context = &global_context[sockfd-fd_offset];
+    context_t* context = &global_context[sockfd];
     context->state = WAIT_ACK;
 }
 
@@ -114,7 +122,7 @@ main(int argc, const char** argv)
                 /*
                     XXX TODO:
                     Llamar a rutina de recepción de mensaje:
-                     Hay que ver el global_context[fd-fd_offset].
+                     Hay que ver el global_context[fd].
                      Si está WAIT_ACK, recibir el '*' (y no debería haber nada mas)
                       y pasar a SEND
                      Si está en RECV, recibir. Si terminó, pasar a END
@@ -131,7 +139,7 @@ main(int argc, const char** argv)
                 /*
                     XXX TODO:
                     Llamar a rutina de envío de mensaje:
-                     Hay que ver el global_context[fd-fd_offset]
+                     Hay que ver el global_context[fd]
                      Si está SEND, enviar (si aún hay data para enviar)
                      Si terminó de enviar, pasar a RECV.
 
