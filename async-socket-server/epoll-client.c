@@ -14,7 +14,7 @@
 #define SVRPORT 9090        // server port
 #define SVRADDR "127.0.0.1" // server ip address
 #define MSGSIZE 512         // menssage size
-#define MAXCONC 3         // max concurrency
+#define MAXCONC 2         // max concurrency
 
 /*
     XXX FIXME:
@@ -35,7 +35,7 @@ typedef enum
 typedef struct
 {
     state_t state;
-    uint8_t sendbuf[MSGSIZE];
+    char sendbuf[MSGSIZE];
     int sendbuf_end;
     int sendptr;
 } context_t;
@@ -85,11 +85,10 @@ chg_epoll_mode(int epollfd, int sockfd, uint32_t mode)
 }
 
 state_t
-do_recv(int sockfd)
+do_recv(int fd)
 {
     /*
-        XXX TODO:
-        Hay que ver el global_context[fd].
+        Revisa global_context[fd].
         Si está WAIT_ACK, recibir el '*' (y no debería haber nada mas)
         y pasar a SEND
         Si está en RECV, recibir. Si terminó, pasar a END
@@ -98,44 +97,116 @@ do_recv(int sockfd)
         No puede estar en otro estado.
     */
     char buf[MSGSIZE];
+    int nbytes;
 
-    context_t *context = &global_context[sockfd];
-    switch (context->state)
-    {
+    context_t *context = &global_context[fd];
+    switch (context->state) {
     case WAIT_ACK:
-        int nbytes = recv(sockfd, buf, sizeof buf, 0);
+        nbytes = recv(fd, buf, sizeof buf, 0);
 
         if (nbytes == 1 && buf[0] == '*') {
             // happy path
-            printf("DEBUG: do_recv: received ACK, now in SEND state\n");
+            printf("DEBUG: do_recv(%d): ACK -> SEND\n", fd);
             context->state = SEND;
             break;
         }
 
-        if (nbytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
             // The socket is not *really* ready for recv; wait until it is.
-            printf("INFO: do_recv: EAGAIN | EWOULDBLOCK\n");
+            printf("INFO: do_recv(%d): EAGAIN | EWOULDBLOCK\n", fd);
             break;
         }
 
         // handle error 
-        if (nbytes < 0)
-            printf("WARN: do_recv: %s", strerror(errno));
+        if (nbytes == -1)
+            printf("WARN: do_recv(%d): %s", fd, strerror(errno));
         else if (nbytes == 0)
-            printf("WARN: do_recv: server closed connection unexpectedly\n");
+            printf("WARN: do_recv(%d): server closed connection unexpectedly\n", fd);
         else
-            printf("WARN: do_recv: server sent unexpected message other than ACK\n");
+            printf("WARN: do_recv(%d): server sent unexpected message\n", fd);
+        
         context->state = END;
         break;
 
     case RECV:
+        nbytes = recv(fd, buf, sizeof buf, 0);
 
+        if (nbytes > 0) {
+            // happy path
+            //*** TODO: multiple receive for a single msg not supported yet
+            printf("DEBUG: do_recv(%d): msg received -> END\n", fd);
+            context->state = END;
+            break;
+        }
+
+        if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            // The socket is not *really* ready for recv; wait until it is.
+            printf("INFO: do_recv(%d): EAGAIN | EWOULDBLOCK\n", fd);
+            break;
+        }
+
+        // handle error 
+        if (nbytes == -1)
+            printf("WARN: do_recv: %s", strerror(errno));
+        else if (nbytes == 0)
+            printf("WARN: do_recv(%d): server closed connection unexpectedly\n", fd);
+
+        context->state = END;
         break;
 
     default:
-        die("Error: do_recv: unexpected state %d", context->state);
+        die("Error: do_recv(%d): unexpected state %d", fd, context->state);
     }
     return context->state;
+}
+
+state_t
+do_send(int fd)
+{
+    /*
+        XXX TODO:
+        Llamar a rutina de envío de mensaje:
+        Hay que ver el global_context[fd]
+        Si está SEND, enviar (si aún hay data para enviar)
+        Si terminó de enviar, pasar a RECV.
+
+        No puede estar en otro estado.
+    */
+
+    context_t *ctx = &global_context[fd];
+    if (ctx->state != SEND)
+        die("Error: do_send(%d): forbidden state %d", fd, ctx->state);
+
+    // XXX TODO: por ahora mando siempre lo mismo
+    char *msg = "^mensaje$";
+    strncpy(ctx->sendbuf, msg, sizeof ctx->sendbuf);
+    ctx->sendptr = 0;
+    ctx->sendbuf_end = strlen(msg);
+
+    size_t len = ctx->sendbuf_end - ctx->sendptr;
+    int nbytes = send(fd, &ctx->sendbuf[ctx->sendptr], len, 0);
+
+    if (nbytes == len) {
+        printf("DEBUG: do_send(%d): message sent\n", fd);
+        ctx->state = RECV;
+    }
+    else if (nbytes > 0) {
+        printf("DEBUG: do_send(%d): sent %d bytes\n", fd, nbytes);
+        // XXX TODO: para esto necesito implementar bien el multi-envío x mensaje
+        printf("ERROR: do_send(%d): multiple sends per message not supported yet\n", fd);
+        ctx->state = END;
+    }
+    else {
+        // nbytes == -1
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            printf("INFO: do_send(%d): EAGAIN | EWOULDBLOCK\n", fd);
+        else {
+            printf("WARN: do_send(%d): %s", fd, strerror(errno));
+            ctx->state = END;
+        }
+    }
+
+    return ctx->state;
 }
 
 int main(int argc, const char **argv)
@@ -201,32 +272,37 @@ int main(int argc, const char **argv)
                     chg_epoll_mode(epollfd, fd, EPOLLOUT);
                 else if (state == END) {
                     /*
+                        XXX TODO:
                         Si luego de la rutina de recepción pasó a END,
                         cerrar conexión y conectar nuevamente (cicla conexiones)
                     */
+                   close(fd);
+                   // XXX TODO: re-open connection
                 }
 
             }
             else if (ev & EPOLLOUT)
             {
                 // ready for sending
-                /*
-                    XXX TODO:
-                    Llamar a rutina de envío de mensaje:
-                     Hay que ver el global_context[fd]
-                     Si está SEND, enviar (si aún hay data para enviar)
-                     Si terminó de enviar, pasar a RECV.
+                printf("DEBUG: ready for sending on %d\n", fd);
 
-                     No puede estar en otro estado.
+                state_t state = do_send(fd);
 
-                    Si luego de la rutina de recepción pasó a RECV,
-                     modificar en epoll para que espere EPOLLIN
-                */
-               printf("DEBUG: ready for sending\n");
+                if (state == RECV)
+                    chg_epoll_mode(epollfd, fd, EPOLLIN);
+                else if (state == END) {
+                    /*
+                        XXX TODO:
+                        Si luego de la rutina de envío pasó a END,
+                        cerrar conexión y conectar nuevamente (cicla conexiones)
+                    */
+                    close(fd);
+                    // XXX TODO: re-open connection
+                }
             }
             else
             {
-                die("Error: unexpected event type, ev: %d\n", ev);
+                die("Error: unexpected event type on %d, ev: %d\n", fd, ev);
             }
         } // for nready
     }     // event loop
