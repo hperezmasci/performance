@@ -9,8 +9,19 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+typedef enum {
+	DEBUG,
+	INFO,
+	WARN,
+	ERR
+} loglevel_t;
+
+void set_loglevel(loglevel_t lvl);
+void logger(loglevel_t lvl, char *fmt, ...);
+void logdie(char *fmt, ...);
+
 // Dies (exits with a failure status) after printing the given printf-like
-// message to stdout.
+// message to stderr.
 void die(char* fmt, ...);
 
 // Wraps malloc with error checking: dies if malloc fails.

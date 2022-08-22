@@ -13,15 +13,60 @@
 #include <sys/types.h>
 #define _GNU_SOURCE
 #include <netdb.h>
+#include <assert.h>
+#include <time.h>
+#include <unistd.h>
 
 #define N_BACKLOG 64
 
+static const char*
+level[] = {
+	"DEBUG",
+	"INFO",
+	"WARN",
+	"ERROR"
+};
+
+// minimum loglevel to be logged
+static
+loglevel_t loglevel = INFO;
+
+void
+set_loglevel(loglevel_t lvl)
+{
+	loglevel = lvl;
+}
+
+void logger(loglevel_t lvl, char *fmt, ...)
+{
+	if (lvl < loglevel) return;
+
+	assert(lvl < (sizeof(level)/sizeof(char*)));
+
+	fprintf(stderr, "%ld - %d - %s: ", time(NULL), getpid(), level[lvl]);
+
+	va_list args;
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end(args);
+	fprintf(stderr, "\n");
+}
+
+void logdie(char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	logger(ERR, fmt, args);
+	va_end(args);
+	exit(EXIT_FAILURE);
+}
+
+// XXX FIXME: deprecate (change to logdie)
 void die(char* fmt, ...) {
   va_list args;
   va_start(args, fmt);
   vfprintf(stderr, fmt, args);
   va_end(args);
-  fprintf(stderr, "\n");
   exit(EXIT_FAILURE);
 }
 
