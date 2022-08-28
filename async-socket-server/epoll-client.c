@@ -12,12 +12,13 @@
 #include "utils.h"
 
 #define LOGLEVEL INFO		// log from this level
+#define STATSFRQ 10000		// frequency to log stats
+
 #define SVRPORT 9090		// server port
 #define SVRADDR "127.0.0.1"	// server ip address
-#define MSGSIZE 512		// menssage size
-#define MAXCONC 3500		// max concurrency
-#define MAXCONN 1000000		// max number of connections (0 => no limit)
-#define STATSFRQ 10000		// frequency to log stats
+#define MSGSIZE 512			// menssage size
+#define MAXCONC 1			// max concurrency
+#define MAXCONN 0			// max number of connections (0 => no limit)
 
 /*
 	XXX FIXME:
@@ -51,8 +52,8 @@ struct {
 // lo que hace que add_connection pinche cuando está llegando al máximo de FDs
 // dado que no alcanza el espacio. Resolución quick & dirty: agregando
 // espacio en global_context.
-context_t
-global_context[MAXCONC + GCEXTRA];
+//context_t
+context_t* global_context;
 
 
 void
@@ -241,14 +242,26 @@ do_send(int fd)
 	return ctx->state;
 }
 
-int main(int argc, const char **argv)
+void
+help(const char* progname)
 {
+	fprintf(stderr,
+	"Usage:\n"\
+	"%s -h\n"\
+	"%s [IP] [PORT] [MAX_CONNECTIONS] [MAX_CONCURRENCE]\n",
+	progname, progname
+	);
+}
 
+int
+main(int argc, const char **argv)
+{	
 	int portnum = SVRPORT;
 	char addr[16] = SVRADDR;
 	struct sockaddr_in serv_addr;
 
 	int maxconn = MAXCONN;
+	int maxconc = MAXCONC;
 
 	stats.conn = 0;
 	stats.recv = 0;
@@ -257,10 +270,20 @@ int main(int argc, const char **argv)
 	set_loglevel(LOGLEVEL);
 
 	if (argc >= 2) {
+		if (!strcmp(argv[1], "-h")) {
+			help(argv[0]);
+			exit(0);
+		}
 		strncpy(addr, argv[1], 15);
 	}
 	if (argc >= 3) {
 		portnum = atoi(argv[2]);
+	}
+	if (argc >= 4) {
+		maxconn = atoi(argv[3]);
+	}
+	if (argc >= 5) {
+		maxconc = atoi(argv[4]);
 	}
 
 	// prepare server endpoint structure
@@ -276,21 +299,25 @@ int main(int argc, const char **argv)
 		logdie("epoll_create1: %s", strerror(errno));
 
 	// array to hold events for epoll_wait
-	struct epoll_event *events = calloc(MAXCONC, sizeof(struct epoll_event));
+	struct epoll_event *events = calloc(maxconc, sizeof(struct epoll_event));
 	if (events == NULL)
 		logdie("calloc: %s", strerror(errno));
+	
+	global_context = calloc(maxconc+GCEXTRA, sizeof(context_t));
+	if (global_context == NULL)
+		logdie("calloc: %s", strerror(errno));
 
-	// establish MAXCONC connections
-	for (int i = 0; i < MAXCONC; i++) {
+	// establish maxconc connections
+	for (int i = 0; i < maxconc; i++) {
 		int fd = add_connection(epollfd, (struct sockaddr *)&serv_addr);
-		if (!(i % 1000))
+		if (!(i % STATSFRQ))
 			logger(DEBUG, "connection %d open on %d", i, fd);
 	}
 
-	logger(INFO, "%ld - all %d connections are open", time(NULL), MAXCONC);
+	logger(INFO, "%ld - all %d connections are open", time(NULL), maxconc);
 
-	while (maxconn != 0 ? stats.conn < maxconn : 1) {
-		int nready = epoll_wait(epollfd, events, MAXCONC, -1);
+	while (maxconn != 0 ? stats.conn <= maxconn : 1) {
+		int nready = epoll_wait(epollfd, events, maxconc, -1);
 		if (nready == -1)
 			logdie("epoll_wait: %s", strerror(errno));
 
@@ -299,7 +326,7 @@ int main(int argc, const char **argv)
 			uint32_t ev = events[i].events;
 			if (ev & EPOLLIN) {
 				// ready for receiving
-				logger(DEBUG, "ready for rceiving on %d", fd);
+				logger(DEBUG, "ready for receiving on %d", fd);
 
 				state_t state = do_recv(fd);
 
@@ -337,4 +364,6 @@ int main(int argc, const char **argv)
 			else logdie( "unexpected event type on %d, ev: %d", fd, ev);
 		} // for nready
 	}	 // event loop
+	free(global_context);
+	free(events);
 }
