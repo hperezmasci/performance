@@ -88,9 +88,9 @@ void report_peer_connected(const struct sockaddr_in* sa, socklen_t salen) {
   char portbuf[NI_MAXSERV];
   if (getnameinfo((struct sockaddr*)sa, salen, hostbuf, NI_MAXHOST, portbuf,
                   NI_MAXSERV, 0) == 0) {
-    printf("peer (%s, %s) connected\n", hostbuf, portbuf);
+    logger(INFO, "peer (%s, %s) connected", hostbuf, portbuf);
   } else {
-    printf("peer (unknonwn) connected\n");
+    logger(INFO, "peer (unknonwn) connected");
   }
 }
 

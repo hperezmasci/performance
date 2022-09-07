@@ -38,7 +38,7 @@ void serve_connection(int sockfd) {
     logger(DEBUG, "serve_connection: recv: %d", len);
     if (len < 0) {
       if (errno == ECONNRESET) {
-        logger(INFO, "serve_connection: recv: (%d)", errno);
+        logger(WARN, "serve_connection: recv: ECONNRESET");
         break;
       }
       logdie("serve_connection: recv: (%d)", errno);

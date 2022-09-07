@@ -18,6 +18,7 @@
 #include "utils.h"
 
 #define MAXFDS 50000
+#define LOGLEVEL WARN
 
 typedef enum { INITIAL_ACK, WAIT_FOR_MSG, IN_MSG } ProcessingState;
 
@@ -80,7 +81,6 @@ fd_status_t on_peer_ready_recv(int sockfd) {
     // Until the initial ACK has been sent to the peer, there's nothing we
     // want to receive. Also, wait until all data staged for sending is sent to
     // receive more data.
-    printf("(H) on_peer_ready_recv before ACK or with data to be sent\n");
     return fd_status_W;
   }
 
@@ -97,7 +97,6 @@ fd_status_t on_peer_ready_recv(int sockfd) {
       perror_die("recv");
     }
   }
-  printf("(H) on_peer_ready_recv receiving data\n");
   bool ready_to_send = false;
   for (int i = 0; i < nbytes; ++i) {
     switch (peerstate->state) {
@@ -132,7 +131,6 @@ fd_status_t on_peer_ready_send(int sockfd) {
 
   if (peerstate->sendptr >= peerstate->sendbuf_end) {
     // Nothing to send.
-    printf("(H) on_peer_ready_send nothing to be sent\n");
     return fd_status_RW;
   }
   int sendlen = peerstate->sendbuf_end - peerstate->sendptr;
@@ -144,7 +142,6 @@ fd_status_t on_peer_ready_send(int sockfd) {
       perror_die("send");
     }
   }
-  printf("(H) on_peer_ready_send sending data\n");
 
   if (nsent < sendlen) {
     peerstate->sendptr += nsent;
@@ -166,11 +163,13 @@ fd_status_t on_peer_ready_send(int sockfd) {
 int main(int argc, const char** argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
 
+  set_loglevel(LOGLEVEL);
+
   int portnum = 9090;
   if (argc >= 2) {
     portnum = atoi(argv[1]);
   }
-  printf("Serving on port %d\n", portnum);
+  logger(INFO, "Serving on port %d", portnum);
 
   int listener_sockfd = listen_inet_socket(portnum);
   make_socket_non_blocking(listener_sockfd);
@@ -212,7 +211,7 @@ int main(int argc, const char** argv) {
             // This can happen due to the nonblocking socket mode; in this
             // case don't do anything, but print a notice (since these events
             // are extremely rare and interesting to observe...)
-            printf("accept returned EAGAIN or EWOULDBLOCK\n");
+            logger(WARN, "accept returned EAGAIN or EWOULDBLOCK");
           } else {
             perror_die("accept");
           }
@@ -228,7 +227,6 @@ int main(int argc, const char** argv) {
           event.data.fd = newsockfd;
           if (status.want_read) {
             // nunca entra aquí porque on_peer_connected siempre envía '*'
-            printf("(H) want_read after on_peer_connected!\n");
             event.events |= EPOLLIN;
           }
           if (status.want_write) {
@@ -254,7 +252,7 @@ int main(int argc, const char** argv) {
             event.events |= EPOLLOUT;
           }
           if (event.events == 0) {
-            printf("socket %d closing\n", fd);
+            logger(DEBUG, "socket %d closing\n", fd);
             if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL) < 0) {
               perror_die("epoll_ctl EPOLL_CTL_DEL");
             }
@@ -276,7 +274,7 @@ int main(int argc, const char** argv) {
             event.events |= EPOLLOUT;
           }
           if (event.events == 0) {
-            printf("socket %d closing\n", fd);
+            logger(DEBUG,"socket %d closing", fd);
             if (epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, NULL) < 0) {
               perror_die("epoll_ctl EPOLL_CTL_DEL");
             }
