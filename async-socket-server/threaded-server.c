@@ -23,27 +23,27 @@ typedef struct { int sockfd; } thread_config_t;
 
 typedef enum { WAIT_FOR_MSG, IN_MSG } ProcessingState;
 
-void serve_connection(int sockfd) {
-  logger(DEBUG, "server_connection");
+void serve_connection(int sockfd, unsigned long id) {
+  logger(DEBUG, "server_connection(%lu)", id);
   if (send(sockfd, "*", 1, 0) < 1) {
-    logger(ERR, "serve_connection: sending ACK (%d)", errno);
+    logger(ERR, "serve_connection(%lu): sending ACK (%d)", id, errno);
   }
 
   ProcessingState state = WAIT_FOR_MSG;
 
   while (1) {
-    logger(DEBUG, "serve_connection: while");
+    logger(DEBUG, "serve_connection(%lu): while", id);
     uint8_t buf[1024];
     int len = recv(sockfd, buf, sizeof buf, 0);
-    logger(DEBUG, "serve_connection: recv: %d", len);
+    logger(DEBUG, "serve_connection(%lu): recv: %d", id, len);
     if (len < 0) {
       if (errno == ECONNRESET) {
-        logger(WARN, "serve_connection: recv: ECONNRESET");
+        logger(WARN, "serve_connection(%lu): recv: ECONNRESET", id);
         break;
       }
-      logdie("serve_connection: recv: (%d)", errno);
+      logdie("serve_connection(%lu): recv: (%d)", id, errno);
     } else if (len == 0) {
-      logger(WARN, "serve_connection: recv: len 0");
+      logger(WARN, "serve_connection(%lu): recv: len 0", id);
       break;
     }
 
@@ -55,31 +55,31 @@ void serve_connection(int sockfd) {
         if (buf[i] == '^') {
           sbuf = &buf[i+1];
           state = IN_MSG;
-          logger(DEBUG, "serve_connection: change to IN_MSG");
+          logger(DEBUG, "serve_connection(%lu): change to IN_MSG", id);
         }
         break;
 
       case IN_MSG:
         if (buf[i] == '$') {
-          logger(DEBUG, "serve_connection: end of message, len: %d", slen);
+          logger(DEBUG, "serve_connection(%lu): end of message, len: %d", id, slen);
           // end of message
           while(slen) {
-            logger(DEBUG, "serve_connection: bytes to send: %d", slen);
+            logger(DEBUG, "serve_connection(%lu): bytes to send: %d", id, slen);
             int nsent = send(sockfd, sbuf, slen, MSG_NOSIGNAL);
-            logger(DEBUG, "serve_connection: bytes sent: %d", nsent);
+            logger(DEBUG, "serve_connection(%lu): bytes sent: %d", id, nsent);
             if (nsent < 0) {
-              logger(ERR, "serve_connection: send: %d", errno);
+              logger(ERR, "serve_connection(%lu): send: %d", id, errno);
               break;
             }
             if (nsent == 0) {
-              logger(WARN, "serve_connection: sent 0 bytes");
+              logger(WARN, "serve_connection(%lu): sent 0 bytes", id);
             }
             slen = slen - nsent;
             sbuf+= nsent;
             assert(slen > 0);
-            if (slen) logger(WARN, "serve_connection: need to send more than once");
+            if (slen) logger(WARN, "serve_connection(%lu): need to send more than once",id);
           }
-          logger(DEBUG, "serve_connection: change to WAIT_FOR_MSG");
+          logger(DEBUG, "serve_connection(%lu): change to WAIT_FOR_MSG", id);
           state = WAIT_FOR_MSG;
         } else {
           slen++;
@@ -87,7 +87,7 @@ void serve_connection(int sockfd) {
         break;
       }
     }
-    break; // XXX BUG, escapo forzando por ahora 1 solo ciclo x server
+    //break; // XXX BUG, escapo forzando por ahora 1 solo ciclo x server
   }
 
   close(sockfd);
@@ -103,7 +103,7 @@ void* server_thread(void* arg) {
   unsigned long id = (unsigned long)pthread_self();
   logger(DEBUG, "Thread %lu created to handle connection with socket %d", id,
          sockfd);
-  serve_connection(sockfd);
+  serve_connection(sockfd, id);
   logger(DEBUG, "Thread %lu done", id);
   return 0;
 }
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
     conn++;
 
     if (newsockfd < 0) {
-      logdie("accept: %d");
+      logdie("accept: %d", errno);
     }
 
     if (!(conn % STATSFRQ)) report_peer_connected(&peer_addr, peer_addr_len);

@@ -20,6 +20,7 @@
 #define MSGSIZE 512			// menssage size
 #define CONCURR 1			// max concurrency
 #define MAXCONN 0			// max number of connections (0 => no limit)
+#define MSGXCON 1			// messages per connection
 
 /*
 	XXX FIXME:
@@ -43,6 +44,7 @@ typedef struct
 	char sendbuf[MSGSIZE];
 	int sendbuf_end;
 	int sendptr;
+	int msg_left;
 } context_t;
 
 // statistics
@@ -114,7 +116,7 @@ void del_connection(int epollfd, int sockfd)
 		logdie("del_connection(%d): close: %s", strerror(errno));
 }
 
-int add_connection(int epollfd, struct sockaddr *saddr)
+int add_connection(int epollfd, struct sockaddr *saddr, int msgxcon)
 {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sockfd == -1)
@@ -139,6 +141,7 @@ int add_connection(int epollfd, struct sockaddr *saddr)
 	ctx->state = WAIT_ACK;
 	ctx->sendptr = 0;
 	ctx->sendbuf_end = 0;
+	ctx->msg_left = msgxcon;
 
 	stats.conn++;
 
@@ -175,21 +178,19 @@ do_recv(int fd)
 	int nbytes;
 
 	context_t *ctx = &global_context[fd];
-	switch (ctx->state)
-	{
+
+	switch (ctx->state) {
 	case WAIT_ACK:
 		nbytes = recv(fd, buf, sizeof buf, 0);
 
-		if (nbytes == 1 && buf[0] == '*')
-		{
+		if (nbytes == 1 && buf[0] == '*') {
 			// happy path
 			logger(DEBUG, "do_recv(%d): ACK -> SEND", fd);
 			ctx->state = SEND;
 			break;
 		}
 
-		if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-		{
+		if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 			// The socket is not *really* ready for recv; wait until it is.
 			logger(INFO, "do_recv(%d): EAGAIN | EWOULDBLOCK", fd);
 			break;
@@ -208,19 +209,23 @@ do_recv(int fd)
 
 	case RECV:
 		nbytes = recv(fd, buf, sizeof buf, 0);
-
-		if (nbytes > 0)
-		{
+		if (nbytes > 0) {
 			// happy path
 			//*** TODO: multiple receive for a single msg not supported yet
-			logger(DEBUG, "do_recv(%d): msg received -> END", fd);
-			ctx->state = END;
+			if (--ctx->msg_left) {
+				ctx->state = SEND;
+				logger(DEBUG, "do_recv(%d): msg received -> SEND", fd);
+			}
+			else {
+				ctx->state = END;
+				logger(DEBUG, "do_recv(%d): msg received -> END", fd);
+			}
 			stats.recv++;
+			logger(DEBUG, "do_recv(%d): msg_left: %d", fd, ctx->msg_left);
 			break;
 		}
 
-		if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-		{
+		if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
 			// The socket is not *really* ready for recv; wait until it is.
 			logger(INFO, "do_recv(%d): EAGAIN | EWOULDBLOCK", fd);
 			break;
@@ -265,26 +270,22 @@ do_send(int fd)
 	size_t len = ctx->sendbuf_end - ctx->sendptr;
 	int nbytes = send(fd, &ctx->sendbuf[ctx->sendptr], len, 0);
 
-	if (nbytes == len)
-	{
+	if (nbytes == len) {
 		logger(DEBUG, "do_send(%d): message sent", fd);
 		stats.sent++;
 		ctx->state = RECV;
 	}
-	else if (nbytes > 0)
-	{
+	else if (nbytes > 0) {
 		logger(DEBUG, "do_send(%d): sent %d bytes", fd, nbytes);
 		// XXX TODO: para esto necesito implementar bien el multi-envío x mensaje
 		logger(WARN, "do_send(%d): multiple sends per message not supported yet", fd);
 		ctx->state = END;
 	}
-	else
-	{
+	else {
 		// nbytes == -1
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
 			logger(INFO, "do_send(%d): EAGAIN | EWOULDBLOCK", fd);
-		else
-		{
+		else {
 			logger(WARN, "do_send(%d): %s", fd, strerror(errno));
 			ctx->state = END;
 		}
@@ -298,7 +299,8 @@ void help(const char *progname)
 	fprintf(stderr,
 			"Usage:\n"
 			"%s -h\n"
-			"%s [-a IP] [-p PORT] [-n MAX_CONNECTIONS] [-c CONCURRENCE] [-l LOG_LEVEL]\n",
+			"%s [-a IP] [-p PORT] [-n MAX_CONNECTIONS] [-c CONCURRENCE] " \
+			"[-x MSGS_PER_CONNECTION] [-l LOG_LEVEL]\n",
 			progname, progname);
 }
 
@@ -310,6 +312,7 @@ int main(int argc, char* const *argv)
 
 	int maxconn = MAXCONN;
 	int concurr = CONCURR;
+	int msgxcon = MSGXCON;
 
 	set_loglevel(LOGLEVEL);
 
@@ -319,7 +322,7 @@ int main(int argc, char* const *argv)
 
 	// set options
 	int opt;
-	while ((opt = getopt(argc, argv, "a:p:c:n:l:h")) != -1)
+	while ((opt = getopt(argc, argv, "a:p:c:n:l:x:h")) != -1)
     switch (opt) {
 	case 'a': // address (IP)
 		strncpy(addr, optarg, 15);
@@ -332,6 +335,9 @@ int main(int argc, char* const *argv)
         break;
 	case 'n': // connections
 		maxconn = atoi(optarg);
+		break;
+	case 'x': // messages per connection
+		msgxcon = atoi(optarg);
 		break;
 	case 'l': // log level
 		set_loglevel(atoi(optarg));
@@ -346,8 +352,7 @@ int main(int argc, char* const *argv)
 	// prepare server endpoint structure
 	bzero(&serv_addr, sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
-	if (inet_pton(AF_INET, addr, &serv_addr.sin_addr) <= 0)
-	{
+	if (inet_pton(AF_INET, addr, &serv_addr.sin_addr) <= 0) {
 		logdie("invalid address / Address not supported %s", addr);
 	}
 	serv_addr.sin_port = htons(portnum);
@@ -366,27 +371,23 @@ int main(int argc, char* const *argv)
 		logdie("calloc: %s", strerror(errno));
 
 	// establish concurr connections
-	for (int i = 0; i < concurr; i++)
-	{
-		int fd = add_connection(epollfd, (struct sockaddr *)&serv_addr);
+	for (int i = 0; i < concurr; i++) {
+		int fd = add_connection(epollfd, (struct sockaddr *)&serv_addr, msgxcon);
 		if (!(i % STATSFRQ))
 			logger(DEBUG, "connection %d open on %d", i, fd);
 	}
 
 	logger(INFO, "%ld - all %d connections are open", time(NULL), concurr);
 
-	while (maxconn != 0 ? stats.conn <= maxconn : 1)
-	{
+	while (maxconn != 0 ? stats.conn <= maxconn : 1) {
 		int nready = epoll_wait(epollfd, events, concurr, -1);
 		if (nready == -1)
 			logdie("epoll_wait: %s", strerror(errno));
 
-		for (int i = 0; i < nready; i++)
-		{
+		for (int i = 0; i < nready; i++) {
 			int fd = events[i].data.fd;
 			uint32_t ev = events[i].events;
-			if (ev & EPOLLIN)
-			{
+			if (ev & EPOLLIN) {
 				// ready for receiving
 				logger(DEBUG, "ready for receiving on %d", fd);
 
@@ -394,20 +395,18 @@ int main(int argc, char* const *argv)
 
 				if (state == SEND)
 					chg_epoll_mode(epollfd, fd, EPOLLOUT);
-				else if (state == END)
-				{
+				else if (state == END) {
 					// cierro conexión y conecto nuevamente
 					del_connection(epollfd, fd);
 					int oldfd = fd;
 					logger(DEBUG, "connection closed on %d", fd);
-					fd = add_connection(epollfd, (struct sockaddr *)&serv_addr);
+					fd = add_connection(epollfd, (struct sockaddr *)&serv_addr, msgxcon);
 					logger(DEBUG, "connection re-opened on %d", fd);
 					if (oldfd != fd)
 						logger(WARN, "old fd %d differs from new fd %d", oldfd, fd);
 				}
 			}
-			else if (ev & EPOLLOUT)
-			{
+			else if (ev & EPOLLOUT) {
 				// ready for sending
 				logger(DEBUG, "ready for sending on %d", fd);
 
@@ -415,12 +414,11 @@ int main(int argc, char* const *argv)
 
 				if (state == RECV)
 					chg_epoll_mode(epollfd, fd, EPOLLIN);
-				else if (state == END)
-				{
+				else if (state == END) {
 					// cierro conexión y conecto nuevamente
 					del_connection(epollfd, fd);
 					logger(DEBUG, "connection closed on %d", fd);
-					fd = add_connection(epollfd, (struct sockaddr *)&serv_addr);
+					fd = add_connection(epollfd, (struct sockaddr *)&serv_addr, msgxcon);
 					logger(DEBUG, "connection re-opened on %d", fd);
 				}
 			}
