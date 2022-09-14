@@ -17,6 +17,7 @@
 
 #define SVRPORT 9090		// server port
 #define SVRADDR "127.0.0.1" // server ip address
+#define CLIADDR "0.0.0.0"	// issue: keep it 0.0.0.0 to prevent binding at client side (causes lots of time wait connections)
 #define MSGSIZE 512			// menssage size
 #define CONCURR 1			// max concurrency
 #define MAXCONN 0			// max number of connections (0 => no limit)
@@ -64,6 +65,18 @@ stats_t stats;
 // espacio en global_context.
 // context_t
 context_t *global_context;
+
+void
+set_endpoint(struct sockaddr *addr, char* ip, int port)
+{
+	struct sockaddr_in *inet_addr = (struct sockaddr_in *) addr;
+	bzero(inet_addr, sizeof(*inet_addr));
+	inet_addr->sin_family = AF_INET;
+	if (inet_pton(AF_INET, ip, &inet_addr->sin_addr) <= 0) {
+		logdie("invalid address / Address not supported %s", ip);
+	}
+	inet_addr->sin_port = htons(port);
+}
 
 void
 show_stats()
@@ -116,13 +129,17 @@ void del_connection(int epollfd, int sockfd)
 		logdie("del_connection(%d): close: %s", strerror(errno));
 }
 
-int add_connection(int epollfd, struct sockaddr *saddr, int msgxcon)
+int add_connection(int epollfd, struct sockaddr *saddr, struct sockaddr *caddr, int msgxcon)
 {
 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sockfd == -1)
 		logdie("add_connection: socket: %s", strerror(errno));
 
 	make_socket_non_blocking(sockfd);
+
+	// avoid bind if sin_addr is 0 (causes lots of timewait connections)
+	if (((struct sockaddr_in*)caddr)->sin_addr.s_addr && bind(sockfd, caddr, sizeof(*caddr)))
+		logdie("add_connection: bind: %s (%d)", strerror(errno), errno);
 
 	if (connect(sockfd, saddr, sizeof(*saddr)) && errno != EINPROGRESS)
 		logdie("add_connection: connect: %s", strerror(errno));
@@ -299,7 +316,7 @@ void help(const char *progname)
 	fprintf(stderr,
 			"Usage:\n"
 			"%s -h\n"
-			"%s [-a IP] [-p PORT] [-n MAX_CONNECTIONS] [-c CONCURRENCE] " \
+			"%s [-a IP] [-i IP] [-p PORT] [-n MAX_CONNECTIONS] [-c CONCURRENCE] " \
 			"[-x MSGS_PER_CONNECTION] [-l LOG_LEVEL]\n",
 			progname, progname);
 }
@@ -307,8 +324,10 @@ void help(const char *progname)
 int main(int argc, char* const *argv)
 {
 	int portnum = SVRPORT;
-	char addr[16] = SVRADDR;
-	struct sockaddr_in serv_addr;
+	char saddr[16] = SVRADDR;
+	char caddr[16] = CLIADDR;
+
+	struct sockaddr client_addr, serv_addr;
 
 	int maxconn = MAXCONN;
 	int concurr = CONCURR;
@@ -322,11 +341,14 @@ int main(int argc, char* const *argv)
 
 	// set options
 	int opt;
-	while ((opt = getopt(argc, argv, "a:p:c:n:l:x:h")) != -1)
+	while ((opt = getopt(argc, argv, "a:i:p:c:n:l:x:h")) != -1)
     switch (opt) {
 	case 'a': // address (IP)
-		strncpy(addr, optarg, 15);
-        break;	
+		strncpy(saddr, optarg, 15);
+        break;
+	case 'i': // client address to bind
+		strncpy(caddr, optarg, 15);
+		break;
     case 'p': // port
 	  	portnum = atoi(optarg);
         break;	
@@ -350,12 +372,8 @@ int main(int argc, char* const *argv)
 	}
 
 	// prepare server endpoint structure
-	bzero(&serv_addr, sizeof(serv_addr));
-	serv_addr.sin_family = AF_INET;
-	if (inet_pton(AF_INET, addr, &serv_addr.sin_addr) <= 0) {
-		logdie("invalid address / Address not supported %s", addr);
-	}
-	serv_addr.sin_port = htons(portnum);
+	set_endpoint(&serv_addr, saddr, portnum);
+	set_endpoint(&client_addr, caddr, 0);
 
 	int epollfd = epoll_create1(0);
 	if (epollfd < 0)
@@ -372,7 +390,7 @@ int main(int argc, char* const *argv)
 
 	// establish concurr connections
 	for (int i = 0; i < concurr; i++) {
-		int fd = add_connection(epollfd, (struct sockaddr *)&serv_addr, msgxcon);
+		int fd = add_connection(epollfd, &serv_addr, &client_addr, msgxcon);
 		if (!(i % STATSFRQ))
 			logger(DEBUG, "connection %d open on %d", i, fd);
 	}
@@ -400,7 +418,7 @@ int main(int argc, char* const *argv)
 					del_connection(epollfd, fd);
 					int oldfd = fd;
 					logger(DEBUG, "connection closed on %d", fd);
-					fd = add_connection(epollfd, (struct sockaddr *)&serv_addr, msgxcon);
+					fd = add_connection(epollfd, &serv_addr, &client_addr, msgxcon);
 					logger(DEBUG, "connection re-opened on %d", fd);
 					if (oldfd != fd)
 						logger(WARN, "old fd %d differs from new fd %d", oldfd, fd);
@@ -418,7 +436,7 @@ int main(int argc, char* const *argv)
 					// cierro conexión y conecto nuevamente
 					del_connection(epollfd, fd);
 					logger(DEBUG, "connection closed on %d", fd);
-					fd = add_connection(epollfd, (struct sockaddr *)&serv_addr, msgxcon);
+					fd = add_connection(epollfd, &serv_addr, &client_addr, msgxcon);
 					logger(DEBUG, "connection re-opened on %d", fd);
 				}
 			}
