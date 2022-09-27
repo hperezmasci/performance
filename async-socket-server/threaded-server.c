@@ -16,7 +16,7 @@
 
 #include "utils.h"
 
-#define LOGLEVEL INFO		// log from this level
+#define LOGLEVEL INFO	// log from this level
 #define STATSFRQ 10000
 
 typedef struct { int sockfd; } thread_config_t;

@@ -57,6 +57,8 @@ typedef struct
 	struct timeval t;
 } stats_t;
 
+int statsfrq = STATSFRQ;
+
 stats_t stats;
 
 // problema: los file descriptors no se asignan siempre de forma secuencial
@@ -162,7 +164,7 @@ int add_connection(int epollfd, struct sockaddr *saddr, struct sockaddr *caddr, 
 
 	stats.conn++;
 
-	if (!(stats.conn % STATSFRQ)) show_stats();
+	if (!(stats.conn % statsfrq)) show_stats();
 
 	return sockfd;
 }
@@ -314,10 +316,11 @@ do_send(int fd)
 void help(const char *progname)
 {
 	fprintf(stderr,
-			"Usage:\n"
-			"%s -h\n"
-			"%s [-a IP] [-i IP] [-p PORT] [-n MAX_CONNECTIONS] [-c CONCURRENCE] " \
-			"[-x MSGS_PER_CONNECTION] [-l LOG_LEVEL]\n",
+		"Usage:\n"
+		"%s -h\n"
+		"%s [-a IP] [-i IP] [-p PORT] [-n MAX_CONNECTIONS] " \
+		"[-c CONCURRENCE] [-x MSGS_PER_CONNECTION] " \
+		"[-s STATS_FREQUENCY] [-l LOG_LEVEL]\n",
 			progname, progname);
 }
 
@@ -341,7 +344,7 @@ int main(int argc, char* const *argv)
 
 	// set options
 	int opt;
-	while ((opt = getopt(argc, argv, "a:i:p:c:n:l:x:h")) != -1)
+	while ((opt = getopt(argc, argv, "a:i:p:c:n:l:x:s:h")) != -1)
     switch (opt) {
 	case 'a': // address (IP)
 		strncpy(saddr, optarg, 15);
@@ -363,6 +366,9 @@ int main(int argc, char* const *argv)
 		break;
 	case 'l': // log level
 		set_loglevel(atoi(optarg));
+		break;
+	case 's': // stats frq
+		statsfrq = atoi(optarg);
 		break;
 	case '?':
 	case 'h':
