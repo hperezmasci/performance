@@ -14,6 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+
+#define handle_error_en(en, msg) \
+	do { errno = en; perror(msg); exit(EXIT_FAILURE); } while (0)
 
 void* threadfunc(void* p) {
   printf("%ld: thread 0x%0x\n", (long)p, (unsigned)pthread_self());
@@ -33,7 +37,8 @@ int main(int argc, const char** argv) {
   for (long i = 0; i < nthreads; ++i) {
     pthread_t t;
 
-    pthread_create(&t, NULL, threadfunc, (void*)i);
+    int ret = pthread_create(&t, NULL, threadfunc, (void*)i);
+    if (ret) handle_error_en(ret, "pthread_create");
     usleep(1000);
   }
 

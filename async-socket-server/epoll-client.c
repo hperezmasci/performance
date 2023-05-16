@@ -345,36 +345,36 @@ int main(int argc, char* const *argv)
 	// set options
 	int opt;
 	while ((opt = getopt(argc, argv, "a:i:p:c:n:l:x:s:h")) != -1)
-    switch (opt) {
-	case 'a': // address (IP)
-		strncpy(saddr, optarg, 15);
-        break;
-	case 'i': // client address to bind
-		strncpy(caddr, optarg, 15);
-		break;
-    case 'p': // port
-	  	portnum = atoi(optarg);
-        break;	
-	case 'c': // concurrency
-        concurr = atoi(optarg);
-        break;
-	case 'n': // connections
-		maxconn = atoi(optarg);
-		break;
-	case 'x': // messages per connection
-		msgxcon = atoi(optarg);
-		break;
-	case 'l': // log level
-		set_loglevel(atoi(optarg));
-		break;
-	case 's': // stats frq
-		statsfrq = atoi(optarg);
-		break;
-	case '?':
-	case 'h':
-	default:
-		help(argv[0]);
-		exit(1);
+	switch (opt) {
+		case 'a': // address (IP)
+			strncpy(saddr, optarg, 15);
+	        break;
+		case 'i': // client address to bind
+			strncpy(caddr, optarg, 15);
+			break;
+		case 'p': // port
+		  	portnum = atoi(optarg);
+	        break;	
+		case 'c': // concurrency
+			concurr = atoi(optarg);
+	        break;
+		case 'n': // connections
+			maxconn = atoi(optarg);
+			break;
+		case 'x': // messages per connection
+			msgxcon = atoi(optarg);
+			break;
+		case 'l': // log level
+			set_loglevel(atoi(optarg));
+			break;
+		case 's': // stats frq
+			statsfrq = atoi(optarg);
+			break;
+		case '?':
+		case 'h':
+		default:
+			help(argv[0]);
+			exit(1);
 	}
 
 	// prepare server endpoint structure

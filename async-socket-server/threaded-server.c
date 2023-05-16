@@ -16,12 +16,29 @@
 
 #include "utils.h"
 
-#define LOGLEVEL INFO	// log from this level
+#define LOGLEVEL ERR	// log from this level
 #define STATSFRQ 10000
+#define DUMMY_WORK 2000 // times calling wait
+#define DUMMY_WAIT 5000 // microseconds to wait
 
 typedef struct { int sockfd; } thread_config_t;
 
 typedef enum { WAIT_FOR_MSG, IN_MSG } ProcessingState;
+
+void do_something_dumb()
+{
+	int i=0;
+	ssize_t n;
+	// CPU intensive...
+	for (i=0; i < DUMMY_WORK; i++) {
+		n = write(1, "", 0);
+	}
+	n = 1;
+	// rest...
+	usleep(DUMMY_WAIT);
+	if (n) return;
+	
+}
 
 void serve_connection(int sockfd, unsigned long id) {
   logger(DEBUG, "server_connection(%lu)", id);
@@ -64,6 +81,7 @@ void serve_connection(int sockfd, unsigned long id) {
           logger(DEBUG, "serve_connection(%lu): end of message, len: %d", id, slen);
           // end of message
           while(slen) {
+            do_something_dumb();
             logger(DEBUG, "serve_connection(%lu): bytes to send: %d", id, slen);
             int nsent = send(sockfd, sbuf, slen, MSG_NOSIGNAL);
             logger(DEBUG, "serve_connection(%lu): bytes sent: %d", id, nsent);
@@ -154,3 +172,4 @@ int main(int argc, char** argv) {
 
   return 0;
 }
+
